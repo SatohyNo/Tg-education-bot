@@ -1,0 +1,15 @@
+# дані чату й стан бота — особисті, не публікувати
+messages.jsonl*
+messages.md
+tasks.json*
+topics.json
+files/
+import/
+.claude_work/
+.offset
+.weekly_sent
+bot.log
+*.bak*
+__pycache__/
+.DS_Store
+config.json
