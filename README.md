@@ -1,62 +1,64 @@
-# hw_bot — бот домашніх завдань для Telegram-групи
+# hw_bot — homework bot for a Telegram group
 
-Бот сидить у групі (форум, теми = предмети), зберігає всі повідомлення і через
-[Claude Code](https://claude.com/claude-code) (`claude -p`) веде список ДЗ у `tasks.json`.
-Чистий Python 3, без сторонніх бібліотек.
+The bot lives in a group (a forum where topics = subjects), stores every message and uses
+[Claude Code](https://claude.com/claude-code) (`claude -p`) to maintain a homework list in `tasks.json`.
+Pure Python 3, no third-party libraries.
 
-## Що вміє
+## Features
 
-- **Щосуботи о 18:00** надсилає в групу всі активні ДЗ, задані цього тижня з понеділка по суботу,
-  незалежно від дедлайну (якщо Mac спав — надішле пізніше, але до 22:00).
-- `/dz [N]` — що здавати в найближчі N днів (за замовчуванням 7, максимум 30).
-- Повідомлення з ДЗ, переслані боту в особисті учасником групи, додаються до списку.
-- Якщо Claude недоступний — `/dz` шукає ДЗ за ключовими словами.
+- **Every Saturday at 18:00** it posts to the group all active homework assigned this week from Monday
+  to Saturday, regardless of the deadline (if the Mac was asleep, it posts later, but before 22:00).
+- `/dz [N]` — what is due in the next N days (7 by default, 30 at most).
+- Homework messages forwarded to the bot in a private chat by a group member are added to the list.
+- If Claude is unavailable, `/dz` falls back to a keyword search.
 
-## Встановлення
+## Installation
 
-1. Створи бота в [@BotFather](https://t.me/BotFather), вимкни йому Privacy Mode
-   (`/setprivacy` → Disable), додай у групу.
-2. Збережи токен у файл (у коді його немає):
+1. Create a bot with [@BotFather](https://t.me/BotFather), turn off its Privacy Mode
+   (`/setprivacy` → Disable) and add it to the group.
+2. Save the token to a file (it is not in the code):
    ```sh
    echo "123456:ABC..." > ~/.hw_bot_token && chmod 600 ~/.hw_bot_token
    ```
-3. Встанови й залогінь [Claude Code](https://claude.com/claude-code) (`~/.local/bin/claude`).
-4. Створи `config.json` за зразком `config.example.json`:
+3. Install and log in to [Claude Code](https://claude.com/claude-code) (`~/.local/bin/claude`).
+4. Create `config.json` from `config.example.json`:
    ```sh
    cp config.example.json config.json
    ```
-   - `group` — назва групи (так само, як у Telegram);
-   - `about` — коротко про групу для Claude (університет, курс), можна порожнє;
-   - `bot_name` — ім'я бота в чаті, щоб `import_web.py` пропускав його повідомлення;
-   - `subjects` — предмети; ДЗ розкладаються саме за ними.
-5. Запуск:
+   - `group` — the group name (exactly as in Telegram);
+   - `about` — a short note about the group for Claude (university, year), may be empty;
+   - `bot_name` — the bot's display name in the chat, so `import_web.py` skips its messages;
+   - `subjects` — the subjects; homework is sorted into exactly these.
+5. Run:
    ```sh
    python3 -u hw_bot.py
    ```
 
-### Автозапуск на macOS
+### Autostart on macOS
 
-Скопіюй `com.example.hwbot.plist` у `~/Library/LaunchAgents/`, заміни `/ABSOLUTE/PATH/TO`
-на шлях до папки бота і виконай:
+Copy `com.example.hwbot.plist` to `~/Library/LaunchAgents/`, replace `/ABSOLUTE/PATH/TO`
+with the path to the bot folder and run:
 ```sh
 launchctl load ~/Library/LaunchAgents/com.example.hwbot.plist
 ```
 
-## Налаштування (`hw_bot.py`)
+## Settings (`hw_bot.py`)
 
-| Константа | Значення |
+| Constant | Meaning |
 |---|---|
-| `WEEKLY_DAY, WEEKLY_FROM, WEEKLY_UNTIL` | день (5 = субота) і години суботньої розсилки |
-| `DZ_DAYS`, `DZ_MAX` | горизонт `/dz` за замовчуванням і максимум |
-| `UPDATE_EVERY` | як часто оновлювати список через Claude |
-| `MSG_DAYS` | скільки днів історії чату враховувати |
+| `WEEKLY_DAY, WEEKLY_FROM, WEEKLY_UNTIL` | day (5 = Saturday) and hours of the Saturday digest |
+| `DZ_DAYS`, `DZ_MAX` | default and maximum `/dz` horizon |
+| `UPDATE_EVERY` | how often the list is refreshed through Claude |
+| `MSG_DAYS` | how many days of chat history to consider |
 
-## Імпорт історії
+## Importing history
 
-- `import_export.py` — з Telegram Desktop (Export chat history → JSON).
-- `import_web.py` — з JSON, витягнутого з Telegram Web.
+- `import_export.py` — from Telegram Desktop (Export chat history → JSON).
+- `import_web.py` — from JSON extracted from Telegram Web.
 
-## Дані
+## Data
 
-Усе, що бот збирає (`messages.jsonl`, `tasks.json`, `files/`, логи), лежить поруч зі скриптом
-разом із `config.json` і виключене з git через `.gitignore`.
+Everything the bot collects (`messages.jsonl`, `tasks.json`, `files/`, logs) is stored next to the script
+together with `config.json` and is excluded from git via `.gitignore`.
+
+Note: the bot's replies in Telegram and the prompt for Claude are in Ukrainian.

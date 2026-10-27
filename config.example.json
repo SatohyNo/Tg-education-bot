@@ -1,6 +1,6 @@
 {
- "group": "Назва групи",
- "about": "університет, курс — коротко, для контексту Claude",
+ "group": "Group name",
+ "about": "university, year — briefly, as context for Claude",
  "bot_name": "",
  "subjects": ["Математика", "Фізика", "Програмування", "Англ", "Інше"]
 }

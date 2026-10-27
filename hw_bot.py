@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Збирає повідомлення з Telegram-чату з ДЗ у файл (long polling, без сторонніх бібліотек).
+"""Collects messages from a Telegram homework chat into a file (long polling, no third-party libraries).
 
-Токен читається з ~/.hw_bot_token (у скрипті його немає).
-Повідомлення: messages.md (+ messages.jsonl для пошуку) поруч зі скриптом,
-вкладення: files/
-Список завдань ведеться в tasks.json: фоновий потік раз на UPDATE_EVERY (якщо є нові повідомлення)
-віддає Claude поточний список + нові повідомлення і отримує оновлений список.
-Команда /dz [N] — миттєво показує з tasks.json, що здавати в найближчі N днів (за замовчуванням 7);
-якщо Claude недоступний — пошук за ключовими словами.
+The token is read from ~/.hw_bot_token (it is not in the script).
+Messages: messages.md (+ messages.jsonl for search) next to the script,
+attachments: files/
+The task list is kept in tasks.json: once per UPDATE_EVERY (if there are new messages) a background thread
+gives Claude the current list + new messages and gets back the updated list.
+The /dz [N] command instantly shows from tasks.json what is due in the next N days (7 by default);
+if Claude is unavailable, it falls back to a keyword search.
 """
 import json, os, subprocess, threading, time, urllib.request, urllib.parse
 from datetime import datetime, timedelta
@@ -20,23 +20,23 @@ FILES = os.path.join(OUT, "files")
 LOG = os.path.join(OUT, "messages.md")
 DB = os.path.join(OUT, "messages.jsonl")
 OFFSET = os.path.join(OUT, ".offset")
-CFG = json.load(open(os.path.join(OUT, "config.json"), encoding="utf-8"))  # див. config.example.json
-GROUP = CFG["group"]  # пересилання в особисті боту зараховуються до цієї групи
+CFG = json.load(open(os.path.join(OUT, "config.json"), encoding="utf-8"))  # see config.example.json
+GROUP = CFG["group"]  # messages forwarded to the bot in private are counted for this group
 os.makedirs(FILES, exist_ok=True)
 
-DZ_DAYS, DZ_MAX = 7, 30  # /dz N — дедлайни на найближчі N днів
-MSG_DAYS = 14  # скільки днів чату читати (старше — зазвичай уже прострочено)
+DZ_DAYS, DZ_MAX = 7, 30  # /dz N — deadlines for the next N days
+MSG_DAYS = 14  # how many days of chat to read (older is usually overdue already)
 NO_DEADLINE_MAX = 5
-WEEKLY = os.path.join(OUT, ".weekly_sent")  # дата останньої суботньої розсилки
-WEEKLY_DAY, WEEKLY_FROM, WEEKLY_UNTIL = 5, 18, 22  # субота, з 18:00; якщо Mac спав — до 22:00
-# у суботу — усі ДЗ, задані цього тижня з пн по сб, незалежно від дедлайну
+WEEKLY = os.path.join(OUT, ".weekly_sent")  # date of the last Saturday digest
+WEEKLY_DAY, WEEKLY_FROM, WEEKLY_UNTIL = 5, 18, 22  # Saturday, from 18:00; if the Mac was asleep, until 22:00
+# on Saturday: all homework assigned this week Mon–Sat, regardless of the deadline
 CLAUDE = os.path.expanduser("~/.local/bin/claude")
-AI_DIR = os.path.join(OUT, ".claude_work")  # порожня робоча папка для claude -p
+AI_DIR = os.path.join(OUT, ".claude_work")  # empty working directory for claude -p
 AI_CHARS = 110000
 TASKS = os.path.join(OUT, "tasks.json")
-UPDATE_EVERY = 15 * 60  # не частіше, ніж раз на 15 хв (або одразу на /dz, якщо є нове)
+UPDATE_EVERY = 15 * 60  # at most once per 15 min (or right away on /dz if there is something new)
 AI_MSG_CHARS = 600
-TOPICS = os.path.join(OUT, "topics.json")  # message_thread_id → назва теми форуму
+TOPICS = os.path.join(OUT, "topics.json")  # message_thread_id → forum topic name
 WEEKDAYS = ["понеділок", "вівторок", "середа", "четвер", "п'ятниця", "субота", "неділя"]
 WD_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "нд"]
 SUBJECTS = CFG["subjects"] + ["Інше"] * ("Інше" not in CFG["subjects"])
@@ -75,12 +75,12 @@ PROMPT = """Ти ведеш список домашніх завдань сту�
 - uncertain — true ЛИШЕ коли сумнівний/суперечливий сам дедлайн і викладач його не підтверджував.
 - teacher — true, якщо завдання з пересланого повідомлення.
 - Одне завдання — один об'єкт; дрібні пов'язані речі одного предмета об'єднуй."""
-ai_lock = threading.Lock()  # одне оновлення tasks.json за раз
+ai_lock = threading.Lock()  # one tasks.json update at a time
 topics = json.load(open(TOPICS, encoding="utf-8")) if os.path.exists(TOPICS) else {}
 
 
 def topic_of(msg):
-    """Назва теми форуму для повідомлення (None — якщо чат не форум)."""
+    """Forum topic name for a message (None if the chat is not a forum)."""
     if not msg["chat"].get("is_forum"):
         return None
     if not msg.get("is_topic_message"):
@@ -118,7 +118,7 @@ def group_id():
 
 
 def origin(msg):
-    """(дата, автор) оригіналу для пересланого повідомлення, інакше None."""
+    """(date, author) of the original for a forwarded message, otherwise None."""
     o = msg.get("forward_origin")
     if o:
         name = ((o.get("sender_user") or {}).get("first_name") or o.get("sender_user_name")
@@ -137,7 +137,7 @@ def is_member(chat_id, user_id):
 
 
 def private(msg):
-    """Особисті: переслане від учасника групи зберігаємо як повідомлення групи."""
+    """Private chat: a message forwarded by a group member is saved as a group message."""
     gid, fwd = group_id(), origin(msg)
     if not fwd:
         reply(msg["chat"]["id"], f"Перешли мені повідомлення з ДЗ з групи {GROUP} — я додам їх до /dz.")
@@ -148,7 +148,7 @@ def private(msg):
     date, who = fwd
     text = msg.get("text") or msg.get("caption") or ""
     if any(m["date"] == date and m["text"] == text for m in load(gid, 100000)):
-        return  # вже є
+        return  # already saved
     save(msg, chat_id=gid, chat=GROUP, who=f"{who} (переслано)", date=date)
 
 
@@ -167,7 +167,7 @@ def save(msg, chat_id=None, chat=None, who=None, date=None):
     elif "photo" in msg:
         attach = download(msg["photo"][-1]["file_id"], f"{stamp}.jpg")
     if not text and not attach:
-        return  # службові події (додали бота тощо)
+        return  # service events (bot was added, etc.)
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(f"\n## {when} · {chat} · {who}\n\n{text}\n")
         if attach:
@@ -215,7 +215,7 @@ def fmt(m):
 
 
 def ask_claude(prompt):
-    """claude -p → dict із JSON-відповіді (дві спроби)."""
+    """claude -p → dict from the JSON response (two attempts)."""
     os.makedirs(AI_DIR, exist_ok=True)
     for attempt in range(2):
         r = subprocess.run([CLAUDE, "-p", "--model", "sonnet", "--tools", "", "--no-session-persistence"],
@@ -226,10 +226,10 @@ def ask_claude(prompt):
         if r.returncode != 0 or not out:
             raise RuntimeError(f"claude rc={r.returncode}: {(r.stderr or out)[:200]}")
         try:
-            return json.loads(out[out.index("{"):out.rindex("}") + 1])  # прибрати ``` чи зайвий текст
+            return json.loads(out[out.index("{"):out.rindex("}") + 1])  # strip ``` or extra text
         except ValueError as e:
-            print(f"Claude повернув не JSON (спроба {attempt + 1}):", e)
-    raise RuntimeError("Claude двічі повернув не JSON")
+            print(f"Claude returned non-JSON (attempt {attempt + 1}):", e)
+    raise RuntimeError("Claude returned non-JSON twice")
 
 
 def load_tasks():
@@ -243,16 +243,16 @@ def pending(state, chat_id):
 
 
 def update_tasks(chat_id, force=False):
-    """Оновити tasks.json новими повідомленнями. Повертає True, якщо список оновлено."""
+    """Update tasks.json with new messages. Returns True if the list was updated."""
     with ai_lock:
         state = load_tasks()
         new = pending(state, chat_id)
         if not new or (not force and time.time() - state["run_at"] < UPDATE_EVERY):
             return False
         lines, size = [], 0
-        for m in reversed(new):  # найновіші — в пріоритеті
+        for m in reversed(new):  # newest first
             if len(m["text"]) < 3 and not m["file"]:
-                continue  # «ок», «+», емодзі
+                continue  # "ok", "+", emoji
             line = fmt(m)
             if size + len(line) > AI_CHARS:
                 break
@@ -281,35 +281,35 @@ def update_tasks(chat_id, force=False):
                     else:
                         t["updated"] = prev.get("updated", t["created"])
                 tasks.append(t)
-            tasks += old.values()  # Claude «загубив» — не видаляємо
+            tasks += old.values()  # Claude "lost" them — don't delete
             state["tasks"] = tasks
         state["last_msg"] = max(m["date"] for m in new)
         if os.path.exists(TASKS):
             os.replace(TASKS, TASKS + ".bak")
         json.dump(state, open(TASKS, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        print(f"tasks.json оновлено: {len(new)} нових повідомлень, {len(state['tasks'])} завдань")
+        print(f"tasks.json updated: {len(new)} new messages, {len(state['tasks'])} tasks")
         return True
 
 
 def weekly_post(gid):
-    """Субота 18:00 — повний список ДЗ у General (раз на суботу)."""
+    """Saturday 18:00 — the full homework list in General (once per Saturday)."""
     now = datetime.now()
     today = f"{now:%Y-%m-%d}"
     if now.weekday() != WEEKLY_DAY or not WEEKLY_FROM <= now.hour < WEEKLY_UNTIL:
         return
     if os.path.exists(WEEKLY) and open(WEEKLY).read().strip() == today:
         return
-    open(WEEKLY, "w").write(today)  # спершу позначаємо, щоб не надіслати двічі
+    open(WEEKLY, "w").write(today)  # mark first so it is not sent twice
     try:
         update_tasks(gid, force=True)
     except Exception as e:
-        print("Claude недоступний перед розсилкою:", e)
+        print("Claude unavailable before the digest:", e)
     reply(gid, render_week(now.date()))
-    print("Надіслав суботній список ДЗ")
+    print("Sent the Saturday homework list")
 
 
 def updater(chat_id_fn):
-    """Фоновий потік: раз на хвилину — суботня розсилка і, якщо пора, оновлення списку."""
+    """Background thread: once a minute — the Saturday digest and, when due, a list update."""
     while True:
         try:
             gid = chat_id_fn()
@@ -317,12 +317,12 @@ def updater(chat_id_fn):
                 weekly_post(gid)
                 update_tasks(gid)
         except Exception as e:
-            print("Помилка фонового потоку:", e)
+            print("Background thread error:", e)
         time.sleep(60)
 
 
 def visible(days):
-    """Активні завдання для показу: старі (>MSG_DAYS) без майбутнього дедлайну ховаємо."""
+    """Active tasks to show: old ones (>MSG_DAYS) without a future deadline are hidden."""
     today = datetime.now().date()
     out = []
     for t in load_tasks()["tasks"]:
@@ -337,26 +337,26 @@ def visible(days):
             continue
         t = dict(t)
         if t.get("next_class") and (today - created).days > 7:
-            t["next_class"] = False  # «до наступної пари» тижневої давності вже неактуально
+            t["next_class"] = False  # "by the next class" from over a week ago is no longer relevant
         out.append(t)
     return out
 
 
 def render(tasks, days, weekly=False):
-    """Завжди однаковий формат: що здавати в найближчі days днів, рядок на предмет у секції."""
+    """Always the same format: what is due in the next `days` days, one line per subject in each section."""
     tasks = [t for t in tasks if t.get("status", "active") == "active"]
     today = datetime.now().date()
     end = today + timedelta(days=days)
     later = "🟢 Решта тижня (4–7 днів)" if days == 7 else f"🟢 Далі (до {end:%d.%m})"
     sections = {"🟠 Найближчі 3 дні / до наступної пари": [], later: [], "⚪️ Без дедлайну": []}
-    merged = {}  # (секція, предмет) → один рядок
+    merged = {}  # (section, subject) → one line
     for t in tasks:
         try:
             due = datetime.strptime(t.get("deadline") or "", "%Y-%m-%d").date()
         except ValueError:
             due = None
         if due and (due < today or due > end):
-            continue  # прострочене або поза горизонтом
+            continue  # overdue or beyond the horizon
         if (due and (due - today).days <= 3) or (not due and t.get("next_class")):
             key = "🟠 Найближчі 3 дні / до наступної пари"
         elif due:
@@ -381,7 +381,7 @@ def render(tasks, days, weekly=False):
             line += f" ({due:%d.%m} {WD_SHORT[due.weekday()]})"
         elif g["next"]:
             line += " (наступна пара)"
-        if g["uncertain"] and (due or g["next"]):  # ⚠️ лише до названого, але сумнівного дедлайну
+        if g["uncertain"] and (due or g["next"]):  # ⚠️ only for a stated but doubtful deadline
             line += " ⚠️"
         sections[key].append((due or datetime.max.date(), not g["teacher"], SUBJECTS.index(subject), line))
     if not weekly:
@@ -397,7 +397,7 @@ def render(tasks, days, weekly=False):
 
 
 def render_week(today):
-    """Субота: усі активні ДЗ, задані з понеділка по суботу цього тижня, без фільтра за дедлайном."""
+    """Saturday: all active homework assigned Monday to Saturday this week, no deadline filter."""
     monday = today - timedelta(days=today.weekday())
     saturday = monday + timedelta(days=5)
     by_subject = {}
@@ -428,26 +428,26 @@ def render_week(today):
 
 
 def dz(to, chat_id, days, thread=None):
-    """to — куди відповідати, chat_id — чий чат, thread — тема форуму, де спитали."""
+    """to — where to reply, chat_id — whose chat, thread — the forum topic where it was asked."""
     try:
-        if pending(load_tasks(), chat_id):  # є нові повідомлення — спершу оновити список
+        if pending(load_tasks(), chat_id):  # there are new messages — update the list first
             reply(to, "⏳ Оновлюю список ДЗ…", thread)
             try:
                 update_tasks(chat_id, force=True)
             except Exception as e:
-                print("Claude недоступний:", e)
+                print("Claude unavailable:", e)
                 if not load_tasks()["tasks"]:
                     reply(to, "⚠️ Claude зараз недоступний, шукаю за ключовими словами.\n\n"
                           + homework_words(chat_id, MSG_DAYS), thread)
                     return
         reply(to, render(visible(days), days), thread)
-        print("Відповів на /dz", days)
+        print("Answered /dz", days)
     except Exception as e:
-        print("Помилка /dz:", e)
+        print("/dz error:", e)
 
 
 def reply(chat_id, text, thread=None):
-    while text:  # ліміт Telegram — 4096 символів, ріжемо по рядках
+    while text:  # Telegram limit is 4096 chars, split on line breaks
         cut = len(text) if len(text) <= 3900 else (text.rfind("\n", 0, 3900) + 1 or 3900)
         extra = {"message_thread_id": thread} if thread else {}
         call("sendMessage", chat_id=chat_id, text=text[:cut], **extra)
@@ -458,9 +458,9 @@ offset = int(open(OFFSET).read()) if os.path.exists(OFFSET) else 0
 try:
     call("setMyCommands", commands=json.dumps([{"command": "dz", "description": "Показати ДЗ за останні дні"}]))
 except Exception as e:
-    print("Не вдалося встановити команди:", e)
+    print("Failed to set commands:", e)
 threading.Thread(target=updater, args=(group_id,), daemon=True).start()
-print("Бот працює. Ctrl+C — зупинити.")
+print("Bot is running. Ctrl+C to stop.")
 while True:
     try:
         for upd in call("getUpdates", offset=offset, timeout=60):
@@ -474,22 +474,22 @@ while True:
                         days = int(cmd[1]) if len(cmd) > 1 and cmd[1].isdigit() else DZ_DAYS
                         days = max(1, min(days, DZ_MAX))
                         src = msg["chat"]["id"]
-                        if is_private:  # в особистих — ДЗ групи, якщо людина в ній
+                        if is_private:  # in private — the group's homework, if the user is a member
                             src = group_id()
                             if not src or not is_member(src, msg["from"]["id"]):
                                 reply(msg["chat"]["id"], f"/dz в особистих — тільки для учасників {GROUP}.")
                                 continue
                         thread = msg.get("message_thread_id") if msg.get("is_topic_message") else None
-                        print("/dz", days, "тема", thread)
+                        print("/dz", days, "topic", thread)
                         threading.Thread(target=dz, args=(msg["chat"]["id"], src, days, thread), daemon=True).start()
                     elif is_private:
                         private(msg)
                     else:
-                        topic_of(msg)  # запам'ятати назву теми навіть зі службових повідомлень
+                        topic_of(msg)  # remember the topic name even from service messages
                         save(msg)
                 except Exception as e:
-                    print("Помилка обробки:", e)
+                    print("Processing error:", e)
             open(OFFSET, "w").write(str(offset))
     except Exception as e:
-        print("Помилка мережі, повтор через 10 с:", e)
+        print("Network error, retrying in 10 s:", e)
         time.sleep(10)

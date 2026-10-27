@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Імпорт історії групи з Telegram Desktop (Export chat history → JSON) у messages.jsonl.
+"""Imports group history from Telegram Desktop (Export chat history → JSON) into messages.jsonl.
 
-Шукає найновіший ChatExport_*/result.json у ~/Downloads або в папці бота
-(або шлях до result.json першим аргументом). Повтори не дублюються.
+Looks for the newest ChatExport_*/result.json in ~/Downloads or in the bot folder
+(or takes the path to result.json as the first argument). Duplicates are skipped.
 """
 import glob, json, os, shutil, sys
 
@@ -25,7 +25,7 @@ def main():
         found = glob.glob(os.path.expanduser("~/Downloads/**/ChatExport_*/result.json"), recursive=True)
         found += glob.glob(os.path.join(OUT, "**/ChatExport_*/result.json"), recursive=True)
         if not found:
-            sys.exit("Не знайшов ChatExport_*/result.json у ~/Downloads чи папці бота.")
+            sys.exit("ChatExport_*/result.json not found in ~/Downloads or the bot folder.")
         path = max(found, key=os.path.getmtime)
     export = json.load(open(path, encoding="utf-8"))
     base = os.path.dirname(path)
@@ -37,7 +37,7 @@ def main():
             existing.add((m["date"], m["text"]))
             if m.get("chat") == GROUP:
                 gid = m["chat_id"]
-    if gid is None:  # у Desktop-експорті id без префікса -100
+    if gid is None:  # the Desktop export has the id without the -100 prefix
         gid = int(f"-100{export['id']}")
 
     added = 0
@@ -49,7 +49,7 @@ def main():
             date, text = int(m["date_unixtime"]), flat(m.get("text", ""))
             src = m.get("file") or m.get("photo") or ""
             name = ""
-            if src and not src.startswith("("):  # «(File not included…)» — файл не експортовано
+            if src and not src.startswith("("):  # "(File not included…)" — the file was not exported
                 name = f"{date}_{m['id']}_{os.path.basename(src)}"
                 try:
                     shutil.copy(os.path.join(base, src), os.path.join(FILES, name))
@@ -61,7 +61,7 @@ def main():
             f.write(json.dumps({"date": date, "chat_id": gid, "chat": GROUP, "who": m.get("from") or "?",
                                 "text": text, "file": name}, ensure_ascii=False) + "\n")
             added += 1
-    print(f"Імпортовано {added} повідомлень із {path}")
+    print(f"Imported {added} messages from {path}")
 
 
 main()

@@ -1,4 +1,4 @@
-# дані чату й стан бота — особисті, не публікувати
+# chat data and bot state are private, do not publish
 messages.jsonl*
 messages.md
 tasks.json*
